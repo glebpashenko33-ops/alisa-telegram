@@ -29,6 +29,7 @@ const {
   buildTouch1Message, buildTouch2Message, buildTouch3Message,
   buildDayBeforeMessage, buildMorningReminderMessage, buildConfirmThanksMessage,
   buildCancelMessage, buildBookingConfirmMessage, buildAdminEscalationMessage,
+  buildNewClientNoChannelMessage,
 } = require('../shared/messages');
 const { sendClientMessage } = require('../shared/clientMessaging');
 const { createConversationEngine } = require('../shared/conversationEngine');
@@ -870,8 +871,6 @@ app.listen(PORT, async () => {
           if (r.deleted) continue;
           const phone = normalizePhone(r.client?.phone);
           if (!phone) continue;
-          const chatId = await db.getClientChannel(phone);
-          if (!chatId || !String(chatId).startsWith('tg_')) continue;
           if (await db.hasTrackedRecord(r.id)) continue;
 
           const date = r.datetime ? r.datetime.substring(0, 10) : today;
@@ -880,11 +879,23 @@ app.listen(PORT, async () => {
           const name = r.client?.name || 'Уважаемый клиент';
           const master = STAFF_FULLNAME[r.staff_id] || 'специалист';
 
-          const text = buildBookingConfirmMessage(name, date, startTime, services, master);
-          await sendClientMessage(chatId, text, { getDialog, businessConnectionId: getBusinessConnectionId(), onSent: registerBotSentText });
-          addMessage(chatId, 'assistant', text);
-          await db.addTrackedRecord(r.id, chatId, date, startTime);
-          console.log(`New CRM booking notification sent to chat ${chatId} for record ${r.id}`);
+          // Приоритет канала: сначала Telegram, потом MAX. Если клиента нет
+          // ни в одном мессенджере — оповещаем администратора для связи вручную.
+          const channels = await db.getClientChannels(phone);
+          const chatId = channels.find(c => c.startsWith('tg_')) || channels.find(c => c.startsWith('max_'));
+
+          if (chatId) {
+            const text = buildBookingConfirmMessage(name, date, startTime, services, master);
+            await sendClientMessage(chatId, text, { getDialog, businessConnectionId: getBusinessConnectionId(), onSent: registerBotSentText });
+            addMessage(chatId, 'assistant', text);
+            await db.addTrackedRecord(r.id, chatId, date, startTime);
+            console.log(`New CRM booking notification sent to chat ${chatId} for record ${r.id}`);
+          } else {
+            const text = buildNewClientNoChannelMessage(name, phone, date, startTime, services);
+            await sendTelegram(text, process.env.TELEGRAM_CHAT_ID);
+            await db.addTrackedRecord(r.id, `none_${phone}`, date, startTime);
+            console.log(`New CRM booking has no messenger channel — admin notified for record ${r.id}`);
+          }
         }
       } catch (e) {
         console.error('new booking notification dispatch error:', e.message);
@@ -1032,6 +1043,7 @@ app.listen(PORT, async () => {
           const records = await getRecordsForPeriod(date, date);
           const byId = new Map(records.map(r => [String(r.id), r]));
           for (const t of items) {
+            if (String(t.chat_id).startsWith('none_')) continue;
             const record = byId.get(String(t.record_id));
             const isDeleted = !record || record.deleted === true;
             if (!isDeleted) continue;

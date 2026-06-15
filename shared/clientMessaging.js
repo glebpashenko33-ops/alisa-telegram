@@ -41,6 +41,9 @@ async function sendClientTelegramMessage(chatId, text, { getDialog, businessConn
 async function sendClientMessage(chatId, text, opts = {}) {
   if (String(chatId).startsWith('tg_')) {
     await sendClientTelegramMessage(chatId, text, opts);
+  } else if (String(chatId).startsWith('max_')) {
+    // TODO: интеграция MAX ещё не готова (бот на верификации)
+    console.log('MAX-канал пока не подключён, сообщение не отправлено:', chatId);
   } else {
     await sendAvitoMessage(chatId, text, opts.onSent);
   }

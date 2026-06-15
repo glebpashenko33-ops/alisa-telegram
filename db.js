@@ -59,10 +59,19 @@ async function initDb() {
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS client_channels (
-        phone TEXT PRIMARY KEY,
+        phone TEXT NOT NULL,
         chat_id TEXT NOT NULL,
-        updated_at TIMESTAMP DEFAULT NOW()
+        updated_at TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (phone, chat_id)
       )
+    `);
+
+    // Миграция со старой схемы (один канал на телефон) — поддержка нескольких каналов
+    await pool.query(`
+      ALTER TABLE client_channels DROP CONSTRAINT IF EXISTS client_channels_pkey
+    `);
+    await pool.query(`
+      ALTER TABLE client_channels ADD PRIMARY KEY (phone, chat_id)
     `);
 
     await pool.query(`
@@ -410,7 +419,7 @@ async function setClientChannel(phone, chatId) {
     await pool.query(
       `INSERT INTO client_channels (phone, chat_id, updated_at)
        VALUES ($1, $2, NOW())
-       ON CONFLICT (phone) DO UPDATE SET chat_id = $2, updated_at = NOW()`,
+       ON CONFLICT (phone, chat_id) DO UPDATE SET updated_at = NOW()`,
       [phone, chatId]
     );
     return true;
@@ -422,11 +431,25 @@ async function setClientChannel(phone, chatId) {
 
 async function getClientChannel(phone) {
   try {
-    const res = await pool.query('SELECT chat_id FROM client_channels WHERE phone = $1', [phone]);
+    const res = await pool.query(
+      'SELECT chat_id FROM client_channels WHERE phone = $1 ORDER BY updated_at DESC LIMIT 1',
+      [phone]
+    );
     return res.rows[0]?.chat_id ?? null;
   } catch (e) {
     console.error('[db] getClientChannel ошибка:', e.message);
     return null;
+  }
+}
+
+// Все известные мессенджер-каналы клиента (может быть и Telegram, и MAX)
+async function getClientChannels(phone) {
+  try {
+    const res = await pool.query('SELECT chat_id FROM client_channels WHERE phone = $1', [phone]);
+    return res.rows.map(r => r.chat_id);
+  } catch (e) {
+    console.error('[db] getClientChannels ошибка:', e.message);
+    return [];
   }
 }
 
@@ -843,6 +866,7 @@ module.exports = {
   markReminderSent,
   setClientChannel,
   getClientChannel,
+  getClientChannels,
   hasVisitConfirmation,
   getVisitConfirmationByRecord,
   addVisitConfirmation,

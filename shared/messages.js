@@ -109,6 +109,17 @@ function buildAdminEscalationMessage(name, phone, startTime) {
     `Напоминания отправлены (вечером и утром), ответа нет — нужно прозвонить.`;
 }
 
+// Уведомление администратору: новая запись из CRM, но клиента нет ни в одном
+// мессенджере (Telegram/MAX) — связаться нужно вручную (звонок)
+function buildNewClientNoChannelMessage(name, phone, date, startTime, services) {
+  const dayMonth = new Date(date + 'T12:00:00+03:00').toLocaleDateString('ru-RU', {
+    day: 'numeric', month: 'long', timeZone: 'Europe/Moscow',
+  });
+  return `🆕 Новая запись из CRM — клиента нет в Telegram/MAX.\n\n` +
+    `👤 ${name || 'Без имени'}\n📞 ${phone || 'без номера'}\n📅 ${dayMonth} в ${startTime}\n✨ ${services}\n\n` +
+    `Свяжитесь с клиентом вручную (звонок/SMS), чтобы подтвердить запись.`;
+}
+
 // Уведомление об отмене записи (CRM)
 function buildCancelMessage(date, startTime) {
   const dayMonth = new Date(date + 'T12:00:00+03:00').toLocaleDateString('ru-RU', {
@@ -136,5 +147,6 @@ module.exports = {
   buildBookingConfirmMessage,
   buildAdminEscalationMessage,
   buildComplaintRequestMessage,
+  buildNewClientNoChannelMessage,
   buildCancelMessage,
 };
