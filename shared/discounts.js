@@ -17,16 +17,27 @@ function capitalize(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// Текст скидочного поста: 1-2 окна на массаж (60 и 90 мин со скидкой 20%),
-// и опционально окно на комплекс "Стандарт" (тоже со скидкой 20%)
-function buildDiscountPost(date, times, includeComplex) {
+const STAFF_FIRSTNAME = {
+  [STAFF.NIKITA]: 'Никита',
+  [STAFF.PAVEL]: 'Павел',
+  [STAFF.ALEXANDER]: 'Александр',
+};
+
+// Текст скидочного поста: 1-2 окна на массаж (60 и 90 мин со скидкой 20%)
+// с указанием мастера, и опционально окно на комплекс "Стандарт" (тоже -20%)
+function buildDiscountPost(date, windows, complexWindow) {
   const { full: full60, discounted: disc60 } = DISCOUNT_MASSAGE_PRICES[60];
   const { full: full90, discounted: disc90 } = DISCOUNT_MASSAGE_PRICES[90];
 
-  let text = `🗓️ ${capitalize(fmtDate(date))}\n\n${times.join(' и ')}\n\n`;
-  text += `— Массаж 60 минут — ${disc60}₽\nвместо ${full60}₽\n`;
-  text += `— Массаж 90 минут – ${disc90}₽\nвместо ${full90}₽\n`;
-  if (includeComplex) {
+  const lines = windows.map(w => `${w.time} — ${w.staffName}`);
+  if (complexWindow) lines.push(`${complexWindow.time} — ${complexWindow.staffName}`);
+
+  let text = `🗓️ ${capitalize(fmtDate(date))}\n\n${lines.join('\n')}\n\n`;
+  if (windows.length) {
+    text += `— Массаж 60 минут — ${disc60}₽\nвместо ${full60}₽\n`;
+    text += `— Массаж 90 минут – ${disc90}₽\nвместо ${full90}₽\n`;
+  }
+  if (complexWindow) {
     const { full: fullC, discounted: discC } = DISCOUNT_COMPLEX_PRICE;
     text += `— Комплекс Стандарт – ${discC}₽\nвместо ${fullC}₽\n`;
   }
@@ -48,26 +59,29 @@ async function postDiscountWindow() {
     const slots90 = filterDaytimeSlots(massage90.slots);
     const massageTimes = [...new Set([...slots60, ...slots90])].sort();
 
-    const times = massageTimes.slice(0, 2);
+    const windows = massageTimes.slice(0, 2).map(time => {
+      const staffId = (massage60.nikita.includes(time) || massage90.nikita.includes(time))
+        ? STAFF.NIKITA : STAFF.PAVEL;
+      return { time, staffName: STAFF_FIRSTNAME[staffId] };
+    });
 
-    let includeComplex = false;
-    if (times.length < 2) {
+    let complexWindow = null;
+    if (windows.length < 2) {
       const dayOfMonth = new Date(today + 'T12:00:00+03:00').getUTCDate();
       if (dayOfMonth % 2 === 0) {
         const alexSlots = filterDaytimeSlots(await getFreeSlots(today, STAFF.ALEXANDER, SERVICES.STANDARD));
         if (alexSlots.length) {
-          includeComplex = true;
-          if (!times.length) times.push(alexSlots[0]);
+          complexWindow = { time: alexSlots[0], staffName: STAFF_FIRSTNAME[STAFF.ALEXANDER] };
         }
       }
     }
 
-    if (!times.length) {
+    if (!windows.length && !complexWindow) {
       console.log('No free slots for discount post today');
       return;
     }
 
-    const text = buildDiscountPost(today, times, includeComplex);
+    const text = buildDiscountPost(today, windows, complexWindow);
 
     const channelChatId = process.env.TELEGRAM_SALE_CHAT_ID;
     if (!channelChatId) {
@@ -81,8 +95,9 @@ async function postDiscountWindow() {
       return;
     }
 
-    await db.addDiscountPost(today, 'daily', null, null, times.join(','), channelChatId, channelMsgId);
-    console.log(`Discount post sent for ${times.join(', ')}${includeComplex ? ' (+ комплекс)' : ''}`);
+    const allTimes = [...windows.map(w => w.time), ...(complexWindow ? [complexWindow.time] : [])];
+    await db.addDiscountPost(today, 'daily', null, null, allTimes.join(','), channelChatId, channelMsgId);
+    console.log(`Discount post sent for ${allTimes.join(', ')}${complexWindow ? ' (+ комплекс)' : ''}`);
   } catch (e) {
     console.error('postDiscountWindow error:', e.message);
   }
