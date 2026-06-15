@@ -850,6 +850,8 @@ app.listen(PORT, async () => {
   if (process.env.DATABASE_URL) {
     setInterval(async () => {
       try {
+        if (await db.getSetting('crm_notifications_enabled') !== 'true') return;
+
         const today = todayMoscow();
         const until = addDaysISO(today, 14);
         const records = await getRecordsForPeriod(today, until);
@@ -885,6 +887,8 @@ app.listen(PORT, async () => {
   if (process.env.DATABASE_URL && process.env.TELEGRAM_CHAT_ID) {
     setInterval(async () => {
       try {
+        if (await db.getSetting('crm_notifications_enabled') !== 'true') return;
+
         const due = await db.getDueEscalations();
         for (const v of due) {
           const client = await findClient(v.phone);
