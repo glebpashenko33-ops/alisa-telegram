@@ -49,9 +49,9 @@ function buildDiscountPost(date, windows, complexWindow) {
 // Утром проверяем расписание — берём свободные окна у Никиты/Павла на массаж
 // 60 и 90 минут (дневные, без ночной записи) и выдаём 1-2 окна со скидкой 20%.
 // Раз в пару дней дополнительно добавляем окно на комплекс "Стандарт" у Александра.
-async function postDiscountWindow() {
+async function postDiscountWindow(date) {
   try {
-    const today = todayMoscow();
+    const today = date || todayMoscow();
 
     const massage60 = await getMassageSlots(today, SERVICES.MASSAGE_60);
     const massage90 = await getMassageSlots(today, SERVICES.MASSAGE_90);

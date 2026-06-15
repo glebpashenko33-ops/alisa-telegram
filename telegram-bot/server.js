@@ -618,6 +618,13 @@ app.get('/test-post-slots', async (req, res) => {
   res.json({ ok: true, info: 'Проверь Telegram канал' });
 });
 
+// Тест скидочного окна: /test-discount-post или /test-discount-post?date=tomorrow
+app.get('/test-discount-post', async (req, res) => {
+  const date = req.query.date === 'tomorrow' ? addDaysISO(todayMoscow(), 1) : todayMoscow();
+  await postDiscountWindow(date);
+  res.json({ ok: true, date, info: 'Проверь Telegram канал (TELEGRAM_SALE_CHAT_ID)' });
+});
+
 // Генерация и отдача демо-голоса Алины (OpenAI TTS)
 const VOICE_DEMO_TEXT = 'Здравствуйте, Андрей! Это центр восстановления Боли.Нет. Напоминаю, у вас запись завтра в четырнадцать ноль-ноль, мануальная терапия у Цоя Александра Игоревича. Подтверждаете?';
 const voiceDemoState = { nova: false, shimmer: false, alloy: false };
