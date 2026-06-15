@@ -42,7 +42,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const engine = createConversationEngine({ anthropic });
 const {
   getDialog, addMessage, getMessages, clearDialog, dialogs,
-  enqueueMessage, generateReminder,
+  generateReminder,
   setHumanTaken, getHumanTakenAt, clearHumanTakenLocalOrDb,
   botSentTexts, registerBotSentText,
   setBusinessConnection, getBusinessConnectionId, getBusinessOwnerId,
@@ -582,7 +582,10 @@ app.post('/client-telegram-webhook', async (req, res) => {
       }
     }
 
-    await enqueueMessage(chatId, msg.text);
+    // Бот не отвечает клиентам "от интеллекта" — только скриптованные сообщения
+    // (подтверждение записи, напоминания, перенос и т.д.). На любые другие
+    // сообщения клиента отвечает только живой администратор через свой Telegram.
+    addMessage(chatId, 'user', msg.text);
   } catch (e) {
     console.error('Client TG webhook error:', e.message);
   }
