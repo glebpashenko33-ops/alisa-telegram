@@ -3,7 +3,7 @@
 // =====================================================================
 
 const db = require('../db');
-const { STAFF, SERVICES, DISCOUNT_MASSAGE_PRICES, DISCOUNT_COMPLEX_PRICE, DISCOUNT_TEMPLATES } = require('./constants');
+const { STAFF, SERVICES, DISCOUNT_MASSAGE_PRICES, DISCOUNT_COMPLEX_PRICE } = require('./constants');
 const { todayMoscow, fmtDate } = require('./time');
 const { getMassageSlots, getFreeSlots } = require('./yclients');
 const { sendTelegram, sendTelegramWithId } = require('./telegramApi');
@@ -13,45 +13,31 @@ function filterDaytimeSlots(slots) {
   return slots.filter(t => parseInt(t.split(':')[0], 10) < 20);
 }
 
-function buildDiscountMassagePost(template, time, duration) {
-  const { full, discounted } = DISCOUNT_MASSAGE_PRICES[duration];
-  if (template === 'A') {
-    return `🕐 Сегодня в ${time} — окно на массаж со скидкой 20%\n` +
-      `Слот освободился, отдаём дешевле чем обычно — лишь бы не пустовало.\n` +
-      `${duration} мин / спина и шея — ${discounted} вместо ${full} ₽\n` +
-      `Успеете сегодня — пишите прямо сюда, запишем за минуту. @boli_net_chat`;
-  }
-  if (template === 'B') {
-    return `Доброе утро. У нас сегодня в ${time} есть окно — и мы отдаём его со скидкой.\n` +
-      `Массаж ${duration} мин — ${discounted} ₽ вместо ${full} ₽.\n` +
-      `Если давно собирались — вот повод. Пишите, запишем.`;
-  }
-  return `${time} сегодня — свободно.\n` +
-    `Массаж ${duration} мин / спина и шея за ${discounted} ₽ — на ${full - discounted} рублей дешевле обычного.\n` +
-    `Таких окон мало, следующее неизвестно когда. Пишите — Алина запишет сразу.`;
+function capitalize(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function buildDiscountComplexPost(template, time) {
-  const { full, discounted } = DISCOUNT_COMPLEX_PRICE;
-  if (template === 'A') {
-    return `🕐 Сегодня в ${time} — комплекс со скидкой 20%\n` +
-      `Стандарт: массаж + мануальная терапия + иглоукалывание/физиотерапия — всё за один сеанс.\n` +
-      `${discounted} ₽ вместо ${full} ₽ — слот освободился, отдаём дешевле чем пустовать.\n` +
-      `Пишите сюда — Алина запишет сразу.`;
+// Текст скидочного поста: 1-2 окна на массаж (60 и 90 мин со скидкой 20%),
+// и опционально окно на комплекс "Стандарт" (тоже со скидкой 20%)
+function buildDiscountPost(date, times, includeComplex) {
+  const { full: full60, discounted: disc60 } = DISCOUNT_MASSAGE_PRICES[60];
+  const { full: full90, discounted: disc90 } = DISCOUNT_MASSAGE_PRICES[90];
+
+  let text = `🗓️ ${capitalize(fmtDate(date))}\n\n${times.join(' и ')}\n\n`;
+  text += `— Массаж 60 минут — ${disc60}₽\nвместо ${full60}₽\n`;
+  text += `— Массаж 90 минут – ${disc90}₽\nвместо ${full90}₽\n`;
+  if (includeComplex) {
+    const { full: fullC, discounted: discC } = DISCOUNT_COMPLEX_PRICE;
+    text += `— Комплекс Стандарт – ${discC}₽\nвместо ${fullC}₽\n`;
   }
-  if (template === 'B') {
-    return `Доброе утро. В ${time} сегодня открылось окно на комплексный сеанс.\n` +
-      `Стандарт — массаж, мануальная терапия и иглоукалывание/физио за один визит.\n` +
-      `Обычно ${full} ₽, сегодня ${discounted} ₽.\n` +
-      `Если давно собирались — удобный момент. Пишите.`;
-  }
-  return `${time} сегодня — есть окно.\n` +
-    `Комплекс Стандарт: массаж + мануалка + иглоукалывание — ${discounted} ₽ вместо ${full} ₽.\n` +
-    `Таких окон мало. Пишите — запишем за минуту.`;
+  text += `\n💆 Кол-во мест строго ограничено.\n\n`;
+  text += `👉 Пишите в личку @boli_net_chat , чтобы занять окно.`;
+  return text;
 }
 
-// Утром проверяем расписание — если у массажистов или у Александра (под "Стандарт")
-// есть пустой слот сегодня, постим скидочное окно (ротация шаблонов А→Б→В)
+// Утром проверяем расписание — берём свободные окна у Никиты/Павла на массаж
+// 60 и 90 минут (дневные, без ночной записи) и выдаём 1-2 окна со скидкой 20%.
+// Раз в пару дней дополнительно добавляем окно на комплекс "Стандарт" у Александра.
 async function postDiscountWindow() {
   try {
     const today = todayMoscow();
@@ -60,40 +46,28 @@ async function postDiscountWindow() {
     const massage90 = await getMassageSlots(today, SERVICES.MASSAGE_90);
     const slots60 = filterDaytimeSlots(massage60.slots);
     const slots90 = filterDaytimeSlots(massage90.slots);
+    const massageTimes = [...new Set([...slots60, ...slots90])].sort();
 
-    let postType, time, staffId, serviceId, duration;
+    const times = massageTimes.slice(0, 2);
 
-    if (slots60.length) {
-      postType = 'massage';
-      duration = 60;
-      time = slots60[0];
-      staffId = massage60.nikita.includes(time) ? STAFF.NIKITA : STAFF.PAVEL;
-      serviceId = SERVICES.MASSAGE_60;
-    } else if (slots90.length) {
-      postType = 'massage';
-      duration = 90;
-      time = slots90[0];
-      staffId = massage90.nikita.includes(time) ? STAFF.NIKITA : STAFF.PAVEL;
-      serviceId = SERVICES.MASSAGE_90;
-    } else {
-      const alexSlots = filterDaytimeSlots(await getFreeSlots(today, STAFF.ALEXANDER, SERVICES.STANDARD));
-      if (!alexSlots.length) {
-        console.log('No free slots for discount post today');
-        return;
+    let includeComplex = false;
+    if (times.length < 2) {
+      const dayOfMonth = new Date(today + 'T12:00:00+03:00').getUTCDate();
+      if (dayOfMonth % 2 === 0) {
+        const alexSlots = filterDaytimeSlots(await getFreeSlots(today, STAFF.ALEXANDER, SERVICES.STANDARD));
+        if (alexSlots.length) {
+          includeComplex = true;
+          if (!times.length) times.push(alexSlots[0]);
+        }
       }
-      postType = 'complex';
-      time = alexSlots[0];
-      staffId = STAFF.ALEXANDER;
-      serviceId = SERVICES.STANDARD;
     }
 
-    const idxRaw = await db.getSetting('discount_post_template_index');
-    const idx = idxRaw ? parseInt(idxRaw) % 3 : 0;
-    const template = DISCOUNT_TEMPLATES[idx];
+    if (!times.length) {
+      console.log('No free slots for discount post today');
+      return;
+    }
 
-    const text = postType === 'massage'
-      ? buildDiscountMassagePost(template, time, duration)
-      : buildDiscountComplexPost(template, time);
+    const text = buildDiscountPost(today, times, includeComplex);
 
     const channelChatId = process.env.TELEGRAM_SALE_CHAT_ID;
     if (!channelChatId) {
@@ -107,9 +81,8 @@ async function postDiscountWindow() {
       return;
     }
 
-    await db.setSetting('discount_post_template_index', String((idx + 1) % 3));
-    await db.addDiscountPost(today, postType, staffId, serviceId, time, channelChatId, channelMsgId);
-    console.log(`Discount post (${postType}${duration ? ' ' + duration : ''}, template ${template}) sent for ${time}`);
+    await db.addDiscountPost(today, 'daily', null, null, times.join(','), channelChatId, channelMsgId);
+    console.log(`Discount post sent for ${times.join(', ')}${includeComplex ? ' (+ комплекс)' : ''}`);
   } catch (e) {
     console.error('postDiscountWindow error:', e.message);
   }
@@ -154,8 +127,7 @@ async function postDailySlots() {
 
 module.exports = {
   filterDaytimeSlots,
-  buildDiscountMassagePost,
-  buildDiscountComplexPost,
+  buildDiscountPost,
   postDiscountWindow,
   postDailySlots,
 };

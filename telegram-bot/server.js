@@ -11,7 +11,7 @@ const express = require('express');
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../db');
 
-const { STAFF, STAFF_FULLNAME } = require('../shared/constants');
+const { STAFF, STAFF_FULLNAME, SERVICES } = require('../shared/constants');
 const { nowMoscow, todayMoscow, fmtDate, addDaysISO, pick, computeSendWindow } = require('../shared/time');
 const {
   getFreeSlots, getMassageSlots, findClient, setRecordAttendance, getRecordsForPeriod,
@@ -1147,7 +1147,14 @@ app.listen(PORT, async () => {
         const posts = await db.getActiveDiscountPosts(today);
         for (const p of posts) {
           let stillFree;
-          if (p.post_type === 'massage') {
+          if (p.post_type === 'daily') {
+            const [massage60, massage90] = await Promise.all([
+              getMassageSlots(today, SERVICES.MASSAGE_60),
+              getMassageSlots(today, SERVICES.MASSAGE_90),
+            ]);
+            const allTimes = new Set([...massage60.slots, ...massage90.slots]);
+            stillFree = p.slot_time.split(',').some(t => allTimes.has(t));
+          } else if (p.post_type === 'massage') {
             const massage = await getMassageSlots(today, Number(p.service_id));
             stillFree = massage.slots.includes(p.slot_time);
           } else {

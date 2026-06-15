@@ -103,7 +103,6 @@ const DISCOUNT_COMPLEX_PRICE = {
   full: COMPLEX_CONFIG['Стандарт'].price,
   discounted: Math.round(COMPLEX_CONFIG['Стандарт'].price * 0.8),
 };
-const DISCOUNT_TEMPLATES = ['A', 'B', 'C'];
 
 module.exports = {
   YC,
@@ -118,5 +117,4 @@ module.exports = {
   calcMassageSalary,
   DISCOUNT_MASSAGE_PRICES,
   DISCOUNT_COMPLEX_PRICE,
-  DISCOUNT_TEMPLATES,
 };
