@@ -1125,14 +1125,14 @@ app.listen(PORT, async () => {
     }, 5 * 60 * 1000);
   }
 
-  // Каждый день в 6:00 МСК — пост со свободными окнами массажа в продающий канал
+  // Каждый день в 9:00 МСК — пост со свободными окнами массажа в продающий канал
   let lastSlotsPostDay = null;
   setInterval(async () => {
     const now = nowMoscow();
     const hour = now.getUTCHours();
     const minute = now.getUTCMinutes();
     const day = now.toISOString().split('T')[0];
-    if (hour === 6 && minute === 0 && day !== lastSlotsPostDay) {
+    if (hour === 9 && minute === 0 && day !== lastSlotsPostDay) {
       lastSlotsPostDay = day;
       await postDailySlots();
     }
