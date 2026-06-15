@@ -11,7 +11,7 @@ const express = require('express');
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../db');
 
-const { STAFF } = require('../shared/constants');
+const { STAFF, STAFF_FULLNAME } = require('../shared/constants');
 const { nowMoscow, todayMoscow, fmtDate, addDaysISO, pick, computeSendWindow } = require('../shared/time');
 const {
   getFreeSlots, getMassageSlots, findClient, setRecordAttendance, getRecordsForPeriod,
@@ -28,7 +28,7 @@ const {
   buildReviewMessage, buildSocialMessage,
   buildTouch1Message, buildTouch2Message, buildTouch3Message,
   buildDayBeforeMessage, buildMorningReminderMessage, buildConfirmThanksMessage,
-  buildCancelMessage,
+  buildCancelMessage, buildBookingConfirmMessage, buildAdminEscalationMessage,
 } = require('../shared/messages');
 const { sendClientMessage } = require('../shared/clientMessaging');
 const { createConversationEngine } = require('../shared/conversationEngine');
@@ -840,6 +840,62 @@ app.listen(PORT, async () => {
         }
       } catch (e) {
         console.error('morning reminder dispatch error:', e.message);
+      }
+    }, 5 * 60 * 1000);
+  }
+
+  // Раз в 5 минут — оповещение о новой записи, созданной напрямую в CRM
+  // (записи, созданные через диалог с Алисой, уже подтверждены и
+  // отслеживаются через tracked_records, поэтому повторно не уведомляем)
+  if (process.env.DATABASE_URL) {
+    setInterval(async () => {
+      try {
+        const today = todayMoscow();
+        const until = addDaysISO(today, 14);
+        const records = await getRecordsForPeriod(today, until);
+
+        for (const r of records) {
+          if (r.deleted) continue;
+          const phone = normalizePhone(r.client?.phone);
+          if (!phone) continue;
+          const chatId = await db.getClientChannel(phone);
+          if (!chatId || !String(chatId).startsWith('tg_')) continue;
+          if (await db.hasTrackedRecord(r.id)) continue;
+
+          const date = r.datetime ? r.datetime.substring(0, 10) : today;
+          const startTime = r.datetime ? r.datetime.substring(11, 16) : '';
+          const services = (r.services || []).map(s => s.title).join(', ') || 'процедура';
+          const name = r.client?.name || 'Уважаемый клиент';
+          const master = STAFF_FULLNAME[r.staff_id] || 'специалист';
+
+          const text = buildBookingConfirmMessage(name, date, startTime, services, master);
+          await sendClientMessage(chatId, text, { getDialog, businessConnectionId: getBusinessConnectionId(), onSent: registerBotSentText });
+          addMessage(chatId, 'assistant', text);
+          await db.addTrackedRecord(r.id, chatId, date, startTime);
+          console.log(`New CRM booking notification sent to chat ${chatId} for record ${r.id}`);
+        }
+      } catch (e) {
+        console.error('new booking notification dispatch error:', e.message);
+      }
+    }, 5 * 60 * 1000);
+  }
+
+  // Раз в 5 минут — эскалация администратору: если клиент не подтвердил
+  // визит на сегодня ни вечером, ни утром, просим прозвонить
+  if (process.env.DATABASE_URL && process.env.TELEGRAM_CHAT_ID) {
+    setInterval(async () => {
+      try {
+        const due = await db.getDueEscalations();
+        for (const v of due) {
+          const client = await findClient(v.phone);
+          const name = client?.name || '';
+          const text = buildAdminEscalationMessage(name, v.phone, v.start_time);
+          await sendTelegram(text, process.env.TELEGRAM_CHAT_ID);
+          await db.markEscalationNotified(v.id);
+          console.log(`Escalation sent to admin for record ${v.record_id}`);
+        }
+      } catch (e) {
+        console.error('escalation dispatch error:', e.message);
       }
     }, 5 * 60 * 1000);
   }

@@ -103,6 +103,12 @@ function buildComplaintRequestMessage() {
   );
 }
 
+// Уведомление администратору: клиент не подтвердил визит сегодня — нужно прозвонить
+function buildAdminEscalationMessage(name, phone, startTime) {
+  return `⚠️ ${name || 'Клиент'} (${phone || 'без номера'}) не подтвердил визит сегодня в ${startTime}.\n` +
+    `Напоминания отправлены (вечером и утром), ответа нет — нужно прозвонить.`;
+}
+
 // Уведомление об отмене записи (CRM)
 function buildCancelMessage(date, startTime) {
   const dayMonth = new Date(date + 'T12:00:00+03:00').toLocaleDateString('ru-RU', {
@@ -128,6 +134,7 @@ module.exports = {
   buildMorningReminderMessage,
   buildConfirmThanksMessage,
   buildBookingConfirmMessage,
+  buildAdminEscalationMessage,
   buildComplaintRequestMessage,
   buildCancelMessage,
 };

@@ -76,8 +76,13 @@ async function initDb() {
         start_time TEXT,
         confirmed BOOLEAN NOT NULL DEFAULT FALSE,
         morning_sent BOOLEAN NOT NULL DEFAULT FALSE,
+        escalation_notified BOOLEAN NOT NULL DEFAULT FALSE,
         sent_at TIMESTAMP DEFAULT NOW()
       )
+    `);
+
+    await pool.query(`
+      ALTER TABLE visit_confirmations ADD COLUMN IF NOT EXISTS escalation_notified BOOLEAN NOT NULL DEFAULT FALSE
     `);
 
     await pool.query(`
@@ -499,6 +504,32 @@ async function markMorningSent(id) {
   }
 }
 
+// Визиты на сегодня, по которым отправлено утреннее напоминание, но нет
+// подтверждения и админ ещё не уведомлён — нужно прозвонить клиента
+async function getDueEscalations() {
+  try {
+    const res = await pool.query(
+      `SELECT * FROM visit_confirmations
+       WHERE visit_date = CURRENT_DATE AND morning_sent = TRUE
+         AND confirmed = FALSE AND escalation_notified = FALSE`
+    );
+    return res.rows;
+  } catch (e) {
+    console.error('[db] getDueEscalations ошибка:', e.message);
+    return [];
+  }
+}
+
+async function markEscalationNotified(id) {
+  try {
+    await pool.query('UPDATE visit_confirmations SET escalation_notified = TRUE WHERE id = $1', [id]);
+    return true;
+  } catch (e) {
+    console.error('[db] markEscalationNotified ошибка:', e.message);
+    return false;
+  }
+}
+
 // =====================================================================
 // review_followups — запрос отзыва после визита (с периодичностью)
 // =====================================================================
@@ -592,6 +623,16 @@ async function addTrackedRecord(recordId, chatId, visitDate, startTime) {
     return true;
   } catch (e) {
     console.error('[db] addTrackedRecord ошибка:', e.message);
+    return false;
+  }
+}
+
+async function hasTrackedRecord(recordId) {
+  try {
+    const res = await pool.query('SELECT 1 FROM tracked_records WHERE record_id = $1', [String(recordId)]);
+    return res.rows.length > 0;
+  } catch (e) {
+    console.error('[db] hasTrackedRecord ошибка:', e.message);
     return false;
   }
 }
@@ -808,6 +849,8 @@ module.exports = {
   getPendingConfirmation,
   markVisitConfirmed,
   markMorningSent,
+  getDueEscalations,
+  markEscalationNotified,
   addReviewFollowup,
   getDueReviewFollowups,
   markReviewFollowupSent,
@@ -815,6 +858,7 @@ module.exports = {
   getDueSocialFollowups,
   markSocialFollowupSent,
   addTrackedRecord,
+  hasTrackedRecord,
   getActiveTrackedRecords,
   markCancelNotified,
   upsertTouchChain,
