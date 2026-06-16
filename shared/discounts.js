@@ -46,29 +46,36 @@ function buildDiscountPost(date, windows, complexWindow) {
   return text;
 }
 
-// Строим карту следующих записей для каждого мастера на дату:
-// { staffId: [minutesFromMidnight, ...] } — отсортированный список времён начала записей.
-async function buildStaffBookingMinutes(date) {
+const MAX_TABLES = 2; // Физических кушеток в кабинете
+
+// Загружаем все записи дня и возвращаем список { startMin, durationMin } по каждой.
+// durationMin берём из r.duration (минуты), если не задано — используем 60 мин как минимум.
+async function loadDayRecords(date) {
   const records = await getRecordsForPeriod(date, date);
-  const map = {};
+  const result = [];
   for (const r of records) {
-    if (r.deleted || !r.datetime || !r.staff_id) continue;
-    const time = r.datetime.substring(11, 16); // "HH:MM"
+    if (r.deleted || !r.datetime) continue;
+    const time = r.datetime.substring(11, 16);
     const [h, m] = time.split(':').map(Number);
-    if (!map[r.staff_id]) map[r.staff_id] = [];
-    map[r.staff_id].push(h * 60 + m);
+    const startMin = h * 60 + m;
+    const durationMin = (r.duration && r.duration > 0) ? r.duration : 60;
+    result.push({ startMin, durationMin, staffId: r.staff_id });
   }
-  for (const sid of Object.keys(map)) map[sid].sort((a, b) => a - b);
-  return map;
+  return result;
+}
+
+// Считает, сколько сессий идёт параллельно в момент slotMin.
+function countConcurrentAt(slotMin, dayRecords) {
+  return dayRecords.filter(r => r.startMin <= slotMin && r.startMin + r.durationMin > slotMin).length;
 }
 
 // Возвращает true если у мастера есть следующая запись менее чем через minGap минут
 // после slotTime ("HH:MM") — значит, слот слишком короткий для реального приёма.
-function slotConflicts(slotTime, staffId, bookingMap, minGap = 60) {
+function slotConflicts(slotTime, staffId, dayRecords, minGap = 60) {
   const [h, m] = slotTime.split(':').map(Number);
   const slotMin = h * 60 + m;
-  const bookings = bookingMap[staffId] || [];
-  return bookings.some(b => b > slotMin && b < slotMin + minGap);
+  // Следующая запись этого мастера начинается раньше, чем закончится сеанс
+  return dayRecords.some(r => r.staffId === staffId && r.startMin > slotMin && r.startMin < slotMin + minGap);
 }
 
 // Утром проверяем расписание — берём свободные окна у Никиты/Павла на массаж
@@ -78,22 +85,26 @@ async function postDiscountWindow(date) {
   try {
     const today = date || todayMoscow();
 
-    const [massage60, massage90, bookingMap] = await Promise.all([
+    const [massage60, massage90, dayRecords] = await Promise.all([
       getMassageSlots(today, SERVICES.MASSAGE_60),
       getMassageSlots(today, SERVICES.MASSAGE_90),
-      buildStaffBookingMinutes(today),
+      loadDayRecords(today),
     ]);
 
     const slots60 = filterDaytimeSlots(massage60.slots);
     const slots90 = filterDaytimeSlots(massage90.slots);
     const massageTimes = [...new Set([...slots60, ...slots90])].sort();
 
-    // Фильтруем слоты, где до следующей записи мастера меньше 60 минут
-    // (YCLIENTS API иногда возвращает слоты, в которые не влезает реальный сеанс)
+    // Двойной фильтр:
+    // 1. До следующей записи этого мастера должно быть ≥ 60 мин (влезает сеанс)
+    // 2. В момент слота уже занято меньше MAX_TABLES кушеток (физическое ограничение)
     const validTimes = massageTimes.filter(time => {
       const staffId = (massage60.nikita.includes(time) || massage90.nikita.includes(time))
         ? STAFF.NIKITA : STAFF.PAVEL;
-      return !slotConflicts(time, staffId, bookingMap, 60);
+      if (slotConflicts(time, staffId, dayRecords, 60)) return false;
+      const [h, m] = time.split(':').map(Number);
+      if (countConcurrentAt(h * 60 + m, dayRecords) >= MAX_TABLES) return false;
+      return true;
     });
 
     const windows = validTimes.slice(0, 2).map(time => {
