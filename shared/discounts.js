@@ -5,7 +5,7 @@
 const db = require('../db');
 const { STAFF, SERVICES, DISCOUNT_MASSAGE_PRICES, DISCOUNT_COMPLEX_PRICE } = require('./constants');
 const { todayMoscow, fmtDate } = require('./time');
-const { getMassageSlots, getFreeSlots } = require('./yclients');
+const { getMassageSlots, getFreeSlots, getRecordsForPeriod } = require('./yclients');
 const { sendTelegram, sendTelegramWithId } = require('./telegramApi');
 
 // На вечернюю запись (с 20:00 до 00:00) скидки не даём
@@ -46,6 +46,31 @@ function buildDiscountPost(date, windows, complexWindow) {
   return text;
 }
 
+// Строим карту следующих записей для каждого мастера на дату:
+// { staffId: [minutesFromMidnight, ...] } — отсортированный список времён начала записей.
+async function buildStaffBookingMinutes(date) {
+  const records = await getRecordsForPeriod(date, date);
+  const map = {};
+  for (const r of records) {
+    if (r.deleted || !r.datetime || !r.staff_id) continue;
+    const time = r.datetime.substring(11, 16); // "HH:MM"
+    const [h, m] = time.split(':').map(Number);
+    if (!map[r.staff_id]) map[r.staff_id] = [];
+    map[r.staff_id].push(h * 60 + m);
+  }
+  for (const sid of Object.keys(map)) map[sid].sort((a, b) => a - b);
+  return map;
+}
+
+// Возвращает true если у мастера есть следующая запись менее чем через minGap минут
+// после slotTime ("HH:MM") — значит, слот слишком короткий для реального приёма.
+function slotConflicts(slotTime, staffId, bookingMap, minGap = 60) {
+  const [h, m] = slotTime.split(':').map(Number);
+  const slotMin = h * 60 + m;
+  const bookings = bookingMap[staffId] || [];
+  return bookings.some(b => b > slotMin && b < slotMin + minGap);
+}
+
 // Утром проверяем расписание — берём свободные окна у Никиты/Павла на массаж
 // 60 и 90 минут (дневные, без ночной записи) и выдаём 1-2 окна со скидкой 20%.
 // Раз в пару дней дополнительно добавляем окно на комплекс "Стандарт" у Александра.
@@ -53,13 +78,25 @@ async function postDiscountWindow(date) {
   try {
     const today = date || todayMoscow();
 
-    const massage60 = await getMassageSlots(today, SERVICES.MASSAGE_60);
-    const massage90 = await getMassageSlots(today, SERVICES.MASSAGE_90);
+    const [massage60, massage90, bookingMap] = await Promise.all([
+      getMassageSlots(today, SERVICES.MASSAGE_60),
+      getMassageSlots(today, SERVICES.MASSAGE_90),
+      buildStaffBookingMinutes(today),
+    ]);
+
     const slots60 = filterDaytimeSlots(massage60.slots);
     const slots90 = filterDaytimeSlots(massage90.slots);
     const massageTimes = [...new Set([...slots60, ...slots90])].sort();
 
-    const windows = massageTimes.slice(0, 2).map(time => {
+    // Фильтруем слоты, где до следующей записи мастера меньше 60 минут
+    // (YCLIENTS API иногда возвращает слоты, в которые не влезает реальный сеанс)
+    const validTimes = massageTimes.filter(time => {
+      const staffId = (massage60.nikita.includes(time) || massage90.nikita.includes(time))
+        ? STAFF.NIKITA : STAFF.PAVEL;
+      return !slotConflicts(time, staffId, bookingMap, 60);
+    });
+
+    const windows = validTimes.slice(0, 2).map(time => {
       const staffId = (massage60.nikita.includes(time) || massage90.nikita.includes(time))
         ? STAFF.NIKITA : STAFF.PAVEL;
       return { time, staffName: STAFF_FIRSTNAME[staffId] };
