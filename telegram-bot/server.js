@@ -22,7 +22,7 @@ const {
   buildDayAnalytics, buildMonthAnalytics, buildWeekAnalytics, countNextWeekStats,
   formatDayReport, formatMonthReport, formatWeekReport, formatDayCloseReport,
 } = require('../shared/analytics');
-const { postDiscountWindow, postDailySlots } = require('../shared/discounts');
+const { postDiscountWindow } = require('../shared/discounts');
 const { normalizePhone } = require('../shared/bookingExtract');
 const {
   buildReviewMessage, buildSocialMessage,
@@ -617,11 +617,6 @@ app.get('/test-telegram', async (req, res) => {
   res.json({ ok: true, info: 'Проверь Telegram' });
 });
 
-app.get('/test-post-slots', async (req, res) => {
-  await postDailySlots();
-  res.json({ ok: true, info: 'Проверь Telegram канал' });
-});
-
 // Тест скидочного окна: /test-discount-post или /test-discount-post?date=tomorrow
 app.get('/test-discount-post', async (req, res) => {
   const date = req.query.date === 'tomorrow' ? addDaysISO(todayMoscow(), 1) : todayMoscow();
@@ -1147,18 +1142,6 @@ app.listen(PORT, async () => {
     }, 5 * 60 * 1000);
   }
 
-  // Каждый день в 9:00 МСК — пост со свободными окнами массажа в продающий канал
-  let lastSlotsPostDay = null;
-  setInterval(async () => {
-    const now = nowMoscow();
-    const hour = now.getUTCHours();
-    const minute = now.getUTCMinutes();
-    const day = now.toISOString().split('T')[0];
-    if (hour === 9 && minute === 0 && day !== lastSlotsPostDay) {
-      lastSlotsPostDay = day;
-      await postDailySlots();
-    }
-  }, 60 * 1000);
 
   // Каждые 5 минут — проверка, не заняли ли слот, под который вышел скидочный пост.
   // Если заняли — удаляем пост (стоп-триггер).

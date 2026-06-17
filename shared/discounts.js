@@ -6,7 +6,7 @@ const db = require('../db');
 const { STAFF, SERVICES, DISCOUNT_MASSAGE_PRICES, DISCOUNT_COMPLEX_PRICE } = require('./constants');
 const { todayMoscow, fmtDate } = require('./time');
 const { getMassageSlots, getFreeSlots, getRecordsForPeriod } = require('./yclients');
-const { sendTelegram, sendTelegramWithId } = require('./telegramApi');
+const { sendTelegramWithId } = require('./telegramApi');
 
 // На вечернюю запись (с 20:00 до 00:00) скидки не даём
 function filterDaytimeSlots(slots) {
@@ -151,46 +151,8 @@ async function postDiscountWindow(date) {
   }
 }
 
-// --- Автопостинг свободных окон в канал в 9:00 МСК ---
-async function postDailySlots() {
-  try {
-    const today = todayMoscow();
-    const tomorrow = new Date(Date.now() + 86400000 + 3 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-    const [todayMassage, tomorrowMassage] = await Promise.all([
-      getMassageSlots(today),
-      getMassageSlots(tomorrow),
-    ]);
-
-    if (!todayMassage.slots.length && !tomorrowMassage.slots.length) {
-      console.log('No massage slots to post today');
-      return;
-    }
-
-    let msg = `💆‍♂️ <b>Свободные окна массажа</b>\n\n`;
-    if (todayMassage.slots.length) {
-      msg += `<b>Сегодня (${fmtDate(today)}):</b>\n${todayMassage.slots.join('  |  ')}\n\n`;
-    }
-    if (tomorrowMassage.slots.length) {
-      msg += `<b>Завтра (${fmtDate(tomorrow)}):</b>\n${tomorrowMassage.slots.join('  |  ')}\n\n`;
-    }
-    msg += `📍 Краснодар, ул. Гаврилова 115, 2 этаж\n📞 +7 995 266-20-00\n💬 Записаться — написать в личку на Авито`;
-
-    const saleChatId = process.env.TELEGRAM_SALE_CHAT_ID;
-    if (saleChatId) {
-      await sendTelegram(msg, saleChatId);
-      console.log('Daily slots posted to @boli_net_sale');
-    } else {
-      console.log('TELEGRAM_SALE_CHAT_ID не задан, постинг пропущен');
-    }
-  } catch (e) {
-    console.error('postDailySlots error:', e.message);
-  }
-}
-
 module.exports = {
   filterDaytimeSlots,
   buildDiscountPost,
   postDiscountWindow,
-  postDailySlots,
 };
