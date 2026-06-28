@@ -26,4 +26,8 @@ function deleteWebhook() {
   return callTelegram('deleteWebhook', {});
 }
 
-module.exports = { callTelegram, sendMessage, setWebhook, deleteWebhook };
+function getUpdates(offset, timeout = 30) {
+  return callTelegram('getUpdates', { offset, timeout });
+}
+
+module.exports = { callTelegram, sendMessage, setWebhook, deleteWebhook, getUpdates };
