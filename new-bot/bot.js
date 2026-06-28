@@ -4,22 +4,76 @@ if (!process.env.BOT_TOKEN) {
   throw new Error('BOT_TOKEN env var is required');
 }
 
+const BTN_NEARBY = '📍 Заправки рядом';
+const BTN_BY_ADDRESS = '🏙 Найти по адресу';
+
+// chatId -> 'awaiting_address' | undefined
+const chatState = {};
+
+const startKeyboard = {
+  keyboard: [[{ text: BTN_NEARBY }], [{ text: BTN_BY_ADDRESS }]],
+  resize_keyboard: true,
+};
+
+const locationKeyboard = {
+  keyboard: [[{ text: 'Отправить мою геолокацию', request_location: true }]],
+  resize_keyboard: true,
+};
+
+async function findNearbyStations(chatId, lat, lon) {
+  // TODO: подключить реальный источник данных по заправкам (БД/API).
+  await sendMessage(chatId, 'Ищу заправки рядом с вами...', { reply_markup: { remove_keyboard: true } });
+}
+
+async function findStationsByAddress(chatId, address) {
+  // TODO: подключить реальный источник данных по заправкам (БД/API).
+  await sendMessage(chatId, `Ищу заправки по адресу: ${address}`, { reply_markup: { remove_keyboard: true } });
+}
+
 async function handleMessage(message) {
   const chatId = message.chat.id;
   const text = (message.text || '').trim();
 
   if (text === '/start') {
-    await sendMessage(chatId, 'Привет! Бот запущен и готов к работе.');
+    chatState[chatId] = undefined;
+    await sendMessage(
+      chatId,
+      'Здравствуйте! Я помогу вам узнать актуальную информацию о заправках. Выберите...',
+      { reply_markup: startKeyboard },
+    );
+    return;
+  }
+
+  if (message.location) {
+    await findNearbyStations(chatId, message.location.latitude, message.location.longitude);
+    return;
+  }
+
+  if (text === BTN_NEARBY) {
+    chatState[chatId] = undefined;
+    await sendMessage(
+      chatId,
+      'Покажу ближайшие заправки — поделитесь своей геопозицией, нажав кнопку ниже. 📍',
+      { reply_markup: locationKeyboard },
+    );
+    return;
+  }
+
+  if (text === BTN_BY_ADDRESS) {
+    chatState[chatId] = 'awaiting_address';
+    await sendMessage(chatId, '✍️ Напишите адрес', { reply_markup: { remove_keyboard: true } });
+    return;
+  }
+
+  if (chatState[chatId] === 'awaiting_address' && text) {
+    chatState[chatId] = undefined;
+    await findStationsByAddress(chatId, text);
     return;
   }
 
   if (text === '/help') {
-    await sendMessage(chatId, 'Доступные команды:\n/start — приветствие\n/help — список команд');
+    await sendMessage(chatId, 'Доступные команды:\n/start — главное меню');
     return;
-  }
-
-  if (text) {
-    await sendMessage(chatId, `Вы написали: ${text}`);
   }
 }
 
