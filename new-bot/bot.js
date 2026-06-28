@@ -1,4 +1,5 @@
 const { sendMessage, getUpdates, deleteWebhook } = require('./lib/telegramApi');
+const { findGasStationsNearby, geocodeAddress } = require('./lib/dgisApi');
 
 if (!process.env.BOT_TOKEN) {
   throw new Error('BOT_TOKEN env var is required');
@@ -20,14 +21,40 @@ const locationKeyboard = {
   resize_keyboard: true,
 };
 
+function formatStationsList(stations) {
+  if (!stations.length) {
+    return 'Заправок рядом не нашлось.';
+  }
+  return stations
+    .map((s, i) => `${i + 1}. ${s.name}${s.address_name ? ` — ${s.address_name}` : ''}`)
+    .join('\n');
+}
+
 async function findNearbyStations(chatId, lat, lon) {
-  // TODO: подключить реальный источник данных по заправкам (БД/API).
   await sendMessage(chatId, 'Ищу заправки рядом с вами...', { reply_markup: { remove_keyboard: true } });
+  try {
+    const stations = await findGasStationsNearby(lat, lon);
+    await sendMessage(chatId, formatStationsList(stations));
+  } catch (err) {
+    console.error('findNearbyStations error:', err);
+    await sendMessage(chatId, 'Не удалось получить список заправок. Попробуйте позже.');
+  }
 }
 
 async function findStationsByAddress(chatId, address) {
-  // TODO: подключить реальный источник данных по заправкам (БД/API).
   await sendMessage(chatId, `Ищу заправки по адресу: ${address}`, { reply_markup: { remove_keyboard: true } });
+  try {
+    const geo = await geocodeAddress(address);
+    if (!geo || !geo.point) {
+      await sendMessage(chatId, 'Не удалось найти такой адрес. Попробуйте написать точнее.');
+      return;
+    }
+    const stations = await findGasStationsNearby(geo.point.lat, geo.point.lon);
+    await sendMessage(chatId, formatStationsList(stations));
+  } catch (err) {
+    console.error('findStationsByAddress error:', err);
+    await sendMessage(chatId, 'Не удалось получить список заправок. Попробуйте позже.');
+  }
 }
 
 async function handleMessage(message) {
